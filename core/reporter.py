@@ -80,21 +80,23 @@ class VulnerabilityReporter:
         
         self.console.print("\n")
 
-    def export_to_json(self, analysis_result: dict, output_dir: str = "."):
+    def export_to_json(self, analysis_result: dict, unified_profile: dict, output_dir: str = "."):
         """
-        saves the final unified report to the filesystem for record keeping
+        saves the final unified report and normalized dataset to the filesystem 
+        for record keeping and third-party siem integration.
         """
         target_name = analysis_result.get("target_name", "unknown_target").replace(" ", "_").lower()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{output_dir}/{target_name}_report_{timestamp}.json"
 
-        # preparing metadata wrapper
+        # preparing metadata and rich data wrapper
         export_data = {
             "metadata": {
                 "scan_time": datetime.now().isoformat(),
-                "engine_version": "1.0"
+                "engine_version": "1.1" # Підняли версію через новий функціонал
             },
-            "profile_analysis": analysis_result
+            "profile_analysis": analysis_result,
+            "normalized_dataset": unified_profile # ДОДАНО: Повний набір очищених даних
         }
 
         try:
