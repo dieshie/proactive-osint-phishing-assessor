@@ -14,7 +14,8 @@ class DataNormalizer:
             "tech_stack": set(),
             "locations": set(),
             "social_anchors": set(),
-            "raw_work_history": set()
+            "raw_work_history": set(),
+            "education_history": set() # НОВЕ ПОЛЕ
         }
 
     def _clean_text(self, text: str) -> str:
@@ -65,6 +66,10 @@ class DataNormalizer:
         if "work" in source_data:
             for job in source_data["work"]:
                 self.unified_profile["raw_work_history"].add(self._clean_text(job))
+        
+        if "education" in source_data:
+            for edu in source_data["education"]:
+                self.unified_profile["education_history"].add(self._clean_text(edu))
 
     def normalize(self, raw_profiles_list: list) -> dict:
         """
@@ -91,6 +96,7 @@ class DataNormalizer:
         self.unified_profile["locations"] = list(self.unified_profile["locations"])
         self.unified_profile["social_anchors"] = list(self.unified_profile["social_anchors"])
         self.unified_profile["raw_work_history"] = list(self.unified_profile["raw_work_history"])
+        self.unified_profile["education_history"] = list(self.unified_profile["education_history"])
         
         # final cleanup of the unified text
         self.unified_profile["unified_context"] = self._clean_text(self.unified_profile["unified_context"])
