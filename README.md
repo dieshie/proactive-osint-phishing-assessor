@@ -77,5 +77,10 @@ Execute the scanning pipeline:
    ```bash
 python main.py
 ```
+## Usage Example
+Below is a demonstration of the `VulnerabilityAnalyzer` processing a sample dataset:
+
+![Analysis Demo](docs/demo.png)
+
 ## Disclaimer
 This tool is for educational and authorized security auditing purposes only. The developer is not responsible for any misuse of this software. Always adhere to the Terms of Service of the platforms being analyzed and local privacy laws.
