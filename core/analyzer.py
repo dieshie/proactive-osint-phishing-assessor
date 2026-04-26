@@ -7,61 +7,72 @@ class VulnerabilityAnalyzer:
     """
 
     def __init__(self):
-        # loading the nlp model for entity recognition
         try:
             self.nlp = spacy.load("en_core_web_sm")
         except OSError:
             print("[!] error: nlp model not found. run: python -m spacy download en_core_web_sm")
             self.nlp = None
 
-        # defining heuristic weights for risk calculation (max total: 100)
         self.weights = {
-            "high_value_target": 25, # access to critical infrastructure or funds
-            "tech_exposure": 20,     # exposed infrastructure details
-            "social_trust": 20,      # exposed family or close connections
-            "corporate_vectors": 20, # identified organizations for bec attacks
-            "behavioral_triggers": 15 # locations or emotional stress markers
+            "high_value_target": 25, 
+            "tech_exposure": 20,     
+            "social_trust": 20,      
+            "corporate_vectors": 20, 
+            "behavioral_triggers": 15 
         }
 
     def _evaluate_hvt_status(self, work_history: list) -> dict:
         """
         checks for high-value target (hvt) indicators in career history
+        and lists ALL identified career vectors
         """
-        hvt_keywords = ['ceo', 'founder', 'director', 'admin', 'devops', 'ciso', 'head']
+        hvt_keywords = ['ceo', 'founder', 'director', 'admin', 'devops', 'ciso', 'head', 'owner']
         result = {"score": 0, "findings": []}
         
+        is_hvt = False
+        all_jobs = []
+
         for job in work_history:
+            all_jobs.append(job)
             if any(keyword in job.lower() for keyword in hvt_keywords):
-                result["score"] = self.weights["high_value_target"]
-                result["findings"].append(f"high-value target role identified: '{job}'")
-                break # applied only once per category
+                is_hvt = True
+
+        if is_hvt:
+            result["score"] = self.weights["high_value_target"]
+            result["findings"].append(f"high-value target role identified in: {', '.join(all_jobs)}")
+        elif all_jobs:
+            # Якщо не HVT, але є місце роботи, все одно виводимо у звіт (без додаткових 25 балів)
+            result["findings"].append(f"career exposure (potential bec vector): {', '.join(all_jobs)}")
                 
         return result
 
-    def _analyze_nlp_context(self, text: str) -> dict:
+    def _analyze_nlp_context(self, text: str, education_history: list) -> dict:
         """
-        performs named entity recognition and semantic analysis on unstructured text
+        performs named entity recognition and integrates isolated academic data
         """
         result = {"score": 0, "findings": []}
-        if not self.nlp or not text:
-            return result
-
-        doc = self.nlp(text)
         found_orgs = set()
-        
-        # extracting corporate entities
-        for ent in doc.ents:
-            if ent.label_ == "ORG":
-                found_orgs.add(ent.text)
+
+        # 1. NLP Аналіз лише для пошуку корпорацій у чистому тексті
+        if self.nlp and text:
+            doc = self.nlp(text)
+            for ent in doc.ents:
+                # Беремо лише справжні ORG і фільтруємо сміттєві фрази
+                if ent.label_ == "ORG" and len(ent.text) > 3 and len(ent.text) < 40:
+                    found_orgs.add(ent.text)
+
+        # 2. Додаємо чітко ізольовані дані про освіту (без багів злиття)
+        for edu in education_history:
+            found_orgs.add(edu)
 
         if found_orgs:
             result["score"] += self.weights["corporate_vectors"]
-            orgs_str = ", ".join(list(found_orgs)[:3]) # keeping report concise
-            result["findings"].append(f"corporate entities exposed (bec risk): {orgs_str}")
+            orgs_str = " | ".join(list(found_orgs)[:4]) 
+            result["findings"].append(f"corporate/academic entities exposed: {orgs_str}")
 
-        # heuristic search for behavioral vulnerabilities
+        # Пошук маркерів стресу
         stress_markers = ["urgent", "stress", "tired", "looking for new opportunities", "open to work"]
-        if any(marker in text.lower() for marker in stress_markers):
+        if text and any(marker in text.lower() for marker in stress_markers):
             result["score"] += self.weights["behavioral_triggers"]
             result["findings"].append("emotional/behavioral stress markers detected")
 
@@ -69,61 +80,53 @@ class VulnerabilityAnalyzer:
 
     def _evaluate_technical_and_social(self, profile: dict) -> dict:
         """
-        assesses technical exposure and social trust vectors
+        assesses technical exposure, social trust vectors, and ALL locations
         """
         result = {"score": 0, "findings": []}
 
-        # evaluating tech stack exposure
         if profile.get("tech_stack"):
             result["score"] += self.weights["tech_exposure"]
-            tech_str = ", ".join(profile["tech_stack"][:3])
+            tech_str = ", ".join(profile["tech_stack"][:5])
             result["findings"].append(f"technology stack exposed: {tech_str}")
 
-        # evaluating social engineering anchors
         if profile.get("social_anchors"):
             result["score"] += self.weights["social_trust"]
-            result["findings"].append(f"trust anchors (family/connections) exposed: {len(profile['social_anchors'])} identified")
+            anchors = ", ".join(profile["social_anchors"])
+            result["findings"].append(f"trust anchors exposed: {anchors}")
 
-        # evaluating location-based tracking
-        if profile.get("locations") and not any("stress" in f for f in result["findings"]):
-            # adding remaining behavioral points if location is found and stress wasn't
+        if profile.get("locations"):
             result["score"] += self.weights["behavioral_triggers"]
-            result["findings"].append(f"geolocation data exposed: {profile['locations'][0]}")
+            locs = " | ".join(profile["locations"])
+            result["findings"].append(f"geolocation/origin data exposed: {locs}")
 
         return result
 
     def _determine_severity(self, score: int) -> str:
-        """
-        maps quantitative score to qualitative risk severity
-        """
         if score <= 25: return "LOW"
         if score <= 50: return "MEDIUM"
         if score <= 75: return "HIGH"
         return "CRITICAL"
 
     def analyze(self, unified_profile: dict) -> dict:
-        """
-        main orchestration method that calculates final vulnerability index
-        """
         final_score = 0
         all_findings = []
 
-        # 1. role analysis (hvt)
         hvt_eval = self._evaluate_hvt_status(unified_profile.get("raw_work_history", []))
         final_score += hvt_eval["score"]
         all_findings.extend(hvt_eval["findings"])
 
-        # 2. nlp context analysis
-        nlp_eval = self._analyze_nlp_context(unified_profile.get("unified_context", ""))
+        # ПЕРЕДАЄМО ОСВІТУ В NLP-АНАЛІЗАТОР
+        nlp_eval = self._analyze_nlp_context(
+            unified_profile.get("unified_context", ""),
+            unified_profile.get("education_history", [])
+        )
         final_score += nlp_eval["score"]
         all_findings.extend(nlp_eval["findings"])
 
-        # 3. tech and social analysis
         tech_soc_eval = self._evaluate_technical_and_social(unified_profile)
         final_score += tech_soc_eval["score"]
         all_findings.extend(tech_soc_eval["findings"])
 
-        # ensuring score mathematically cannot exceed 100
         bounded_score = min(100, final_score)
 
         return {
