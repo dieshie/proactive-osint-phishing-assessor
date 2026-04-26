@@ -40,28 +40,26 @@ The risk assessment logic is based on a weighted sum of identified artifacts. Ea
 ## Installation and Setup
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/your-username/proactive-osint-phishing-assessor.git](https://github.com/your-username/proactive-osint-phishing-assessor.git)
+   git clone [https://github.com/dieshie/proactive-osint-phishing-assessor.git](https://github.com/dieshie/proactive-osint-phishing-assessor.git)
    cd proactive-osint-phishing-assessor
 2. Create and activate a virtual environment:
    ```bash
-python3 -m venv venv
-source venv/bin/activate
-Install dependencies:
+   python3 -m venv venv
+   source venv/bin/activate
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+4. Install Playwright browsers:
+   ```bash
+   playwright install chromium
+5. Download the NLP model:
+   ```bash
+   python -m spacy download en_core_web_sm
 
-Bash
-pip install -r requirements.txt
-Install Playwright browsers:
+## Usage
 
-Bash
-playwright install chromium
-Download the NLP model:
-
-Bash
-python -m spacy download en_core_web_sm
-Usage
 Configure your target list in data/targets.json:
-
-JSON
+   ```bash
 {
     "targets": [
         {
@@ -74,9 +72,10 @@ JSON
         }
     ]
 }
+```
 Execute the scanning pipeline:
-
-Bash
+   ```bash
 python main.py
-Disclaimer
+```
+## Disclaimer
 This tool is for educational and authorized security auditing purposes only. The developer is not responsible for any misuse of this software. Always adhere to the Terms of Service of the platforms being analyzed and local privacy laws.
