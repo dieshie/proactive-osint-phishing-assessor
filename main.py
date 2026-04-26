@@ -101,7 +101,8 @@ class OSINTCoordinator:
                 # optional: exporting to local filesystem
                 export_dir = "data/reports"
                 os.makedirs(export_dir, exist_ok=True)
-                self.reporter.export_to_json(analysis_result, output_dir=export_dir)
+                # ОНОВЛЕНО: Передаємо unified_profile у генератор звітів
+                self.reporter.export_to_json(analysis_result, unified_profile, output_dir=export_dir)
 
             except Exception as e:
                 self.reporter.console.print(f"[bold red][!] critical pipeline error for target {target.get('id')}: {e}[/bold red]")
