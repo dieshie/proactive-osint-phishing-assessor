@@ -1,0 +1,18 @@
+{
+    "metadata": {
+        "scan_time": "2026-04-23T03:05:53.175148",
+        "engine_version": "1.0"
+    },
+    "profile_analysis": {
+        "target_name": "Linus Torvalds",
+        "platforms": [
+            "GitHub"
+        ],
+        "vulnerability_score": 35,
+        "severity_level": "MEDIUM",
+        "identified_vectors": [
+            "technology stack exposed: C",
+            "geolocation data exposed: Portland, OR"
+        ]
+    }
+}

@@ -1,0 +1,22 @@
+{
+    "targets": [
+        {
+            "id": "EMP_001",
+            "last_name": "Zuckerberg",
+            "social_links": {
+                "facebook": "https://www.facebook.com/zuck",
+                "github": "",
+                "linkedin": ""
+            }
+        },
+        {
+            "id": "EMP_002",
+            "last_name": "Torvalds",
+            "social_links": {
+                "facebook": "",
+                "github": "https://github.com/torvalds",
+                "linkedin": ""
+            }
+        }
+    ]
+}
