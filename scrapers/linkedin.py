@@ -5,7 +5,7 @@ from playwright.async_api import async_playwright
 
 class LinkedinScraper:
     """
-    class for extracting osint data from linkedin professional profiles
+    enhanced linkedin scraper with dynamic auditing and improved public profile resilience.
     """
 
     def __init__(self, target_url):
@@ -16,92 +16,73 @@ class LinkedinScraper:
             "about": "",
             "location": [],
             "work": [],
-            "education": []
+            "education": [] # Додано для синхронізації з Facebook
         }
 
-    async def _scroll_page(self, page, scrolls=4):
-        """
-        emulates user scrolling to trigger lazy loading of experience and about sections
-        """
+    async def _scroll_page(self, page, scrolls=3):
         for _ in range(scrolls):
             await page.mouse.wheel(0, 800)
-            await asyncio.sleep(2)
+            await asyncio.sleep(1.5)
 
     def _parse_header(self, soup):
-        """
-        extracts primary identity information from the top profile card
-        """
-        # extracts full name (usually within an h1 tag)
-        name_tag = soup.find('h1')
+        # Намагаємося знайти ім'я в різних тегах (h1 або специфічні класи)
+        name_tag = soup.find('h1') or soup.find('title')
         if name_tag:
-            self.results["full_name"] = name_tag.get_text().strip()
+            name = name_tag.get_text().split('|')[0].strip()
+            self.results["full_name"] = name
+            print(f"    [+] professional identity: {self.results['full_name']}")
 
-        # extracts current headline/job title
-        headline_tag = soup.find('div', class_=re.compile(r'text-body-medium', re.I))
-        if headline_tag:
-            self.results["work"].append(headline_tag.get_text().strip())
-
-        # extracts geographical location
-        loc_tag = soup.find('span', class_=re.compile(r'text-body-small inline t-black--light break-words', re.I))
-        if loc_tag:
-            self.results["location"].append(loc_tag.get_text().strip())
+        # Пошук поточної посади
+        headline = soup.find('div', class_=re.compile(r'text-body-medium|top-card-layout__headline', re.I))
+        if headline:
+            work_info = headline.get_text().strip()
+            self.results["work"].append(work_info)
+            print(f"    [+] career headline extracted: {work_info}")
 
     def _parse_sections(self, soup):
-        """
-        extracts unstructured text from about and experience sections using heuristic markers
-        """
-        # linkedin often encrypts classes, so searching by section headers is more reliable
-        page_text = soup.get_text(separator=' | ')
+        text = soup.get_text(separator=' | ')
+        target_name = self.results.get("full_name", "").lower()
         
-        # heuristic extraction for "about" section
-        about_match = re.search(r'About\s*\|\s*(.*?)(?:\||Experience|Activity)', page_text, re.IGNORECASE | re.DOTALL)
-        if about_match:
-            cleaned_about = re.sub(r'\s+', ' ', about_match.group(1)).strip()
-            if len(cleaned_about) > 20:
-                self.results["about"] = cleaned_about
+        # Витягуємо локацію (з урахуванням коми для більшої точності)
+        loc_match = re.search(r'([A-Z][a-z]+,?\s[A-Z][a-z]+(?:\s[A-Z][a-z]+)?)', text)
+        if loc_match:
+            loc = loc_match.group(1).strip()
+            # Перевіряємо: довжина > 3, це не слово LinkedIn, і це НЕ ім'я нашої цілі
+            if len(loc) > 3 and "LinkedIn" not in loc and loc.lower() not in target_name:
+                self.results["location"].append(loc)
+                print(f"    [+] location data extracted: {loc}")
 
-        # extracting specific experience entries by looking for common job titles and standard text flows
-        experience_blocks = soup.find_all('div', class_=re.compile(r'pvs-list__outer-container', re.I))
-        for block in experience_blocks:
-            text = block.get_text(separator=" ").strip()
-            cleaned_text = re.sub(r'\s+', ' ', text)
-            if "yr" in cleaned_text or "mos" in cleaned_text: # markers for job duration
-                self.results["work"].append(cleaned_text[:200]) # truncating to keep only relevant title/company info
+        # Пошук досвіду
+        if "Experience" in text:
+            print("    [+] experience section detected")
+            
+        # Пошук освіти
+        if "Education" in text:
+            edu_match = re.search(r'Education\s*\|\s*(.*?)\|', text, re.I)
+            if edu_match:
+                edu_info = edu_match.group(1).strip()
+                # Додаємо перевірку, щоб не виводити порожні рядки
+                if len(edu_info) > 4:
+                    self.results["education"].append(edu_info)
+                    print(f"    [+] academic data extracted: {edu_info}")
 
     async def run(self):
-        """
-        orchestrates the scraping sequence and handles potential authentication walls
-        """
         async with async_playwright() as p:
+            # Використовуємо headless=False для LinkedIn, щоб бачити, чи не вискочив логін-волл
             browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
             context = await browser.new_context()
             page = await context.new_page()
             
             await page.goto(self.url)
+            await page.wait_for_timeout(6000) # Даємо час на рендеринг
             
-            # waits for 15 seconds to allow manual login or captcha resolution
-            await page.wait_for_timeout(15000)
-            
-            # scrolls down to load dynamic blocks like experience and education
             await self._scroll_page(page)
             
-            # expands "see more" buttons if they exist
-            try:
-                see_more_buttons = await page.locator("button:has-text('see more')").all()
-                for btn in see_more_buttons:
-                    await btn.click()
-                    await asyncio.sleep(1)
-            except Exception:
-                pass # safely ignores if no expandable buttons are found
-
             html_content = await page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
             
             self._parse_header(soup)
             self._parse_sections(soup)
-            
-            # data cleanup
-            self.results["work"] = list(set(self.results["work"]))
             
             await browser.close()
             return self.results
