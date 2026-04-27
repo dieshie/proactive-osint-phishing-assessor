@@ -1,104 +1,81 @@
-import re
-
 class DataNormalizer:
     """
-    class for aggregating, deduplicating, and standardizing osint data 
-    from multiple cross-platform sources into a single unified profile.
+    Fuses data from multiple OSINT modules into a single Unified Profile.
+    Updated to support all M1-M4 metrics (scalars, booleans, arrays) for 
+    quantitative vulnerability assessment.
     """
-
     def __init__(self):
         self.unified_profile = {
-            "primary_name": "",
-            "platforms_analyzed": [],
-            "unified_context": "", 
-            "tech_stack": set(),
-            "locations": set(),
-            "social_anchors": set(),
-            "raw_work_history": set(),
-            "education_history": set() # НОВЕ ПОЛЕ
+            "full_name": "Unknown",
+            "platforms": [],          # Tracks which scrapers succeeded (Factor 3.3)
+            "about": "",
+            
+            # Arrays (M1, M2, M3, M4)
+            "location": [],
+            "work": [],
+            "education": [],
+            "posts": [],
+            "exposed_family": [],
+            "contacts": [],           # Emails, Messengers
+            "tech_stack": [],         # Programming languages, frameworks
+            
+            # Scalars / Integers (M3, M4)
+            "friends_count": 0,
+            "connections_count": 0,
+            "followers_count": 0,
+            "repo_count": 0,
+            "stars_count": 0,
+            "past_jobs_count": 0,
+            
+            # Booleans (M4)
+            "has_endorsements": False,
+            
+            # Strings
+            "nickname": "",
+            "activity_text": "",
+            "latest_post_date": ""
         }
 
-    def _clean_text(self, text: str) -> str:
-        """
-        removes extra whitespaces, newlines, and normalizes string format
-        """
-        if not text:
-            return ""
-        cleaned = re.sub(r'\s+', ' ', text)
-        return cleaned.strip()
-
-    def _merge_text_context(self, source_data: dict):
-        """
-        concatenates unstructured text fields (about, posts) into a single 
-        semantic block for subsequent nlp processing
-        """
-        context_parts = []
+    def normalize(self, raw_results_list):
+        """Merges a list of scraper result dictionaries into one."""
+        #print("  -> fusing and normalizing cross-platform data...")
         
-        if "about" in source_data and source_data["about"]:
-            context_parts.append(self._clean_text(source_data["about"]))
-            
-        if "posts" in source_data and isinstance(source_data["posts"], list):
-            for post in source_data["posts"]:
-                context_parts.append(self._clean_text(post))
-                
-        if context_parts:
-            # appends new context to the existing unified context
-            new_context = " ".join(context_parts)
-            self.unified_profile["unified_context"] += f" {new_context}"
-
-    def _extract_lists(self, source_data: dict):
-        """
-        extracts structured arrays (locations, tech stack, family) and 
-        adds them to sets to automatically handle deduplication
-        """
-        if "location" in source_data:
-            for loc in source_data["location"]:
-                self.unified_profile["locations"].add(self._clean_text(loc))
-                
-        if "tech_stack" in source_data:
-            for tech in source_data["tech_stack"]:
-                self.unified_profile["tech_stack"].add(self._clean_text(tech))
-                
-        if "exposed_family" in source_data:
-            for family_member in source_data["exposed_family"]:
-                self.unified_profile["social_anchors"].add(self._clean_text(family_member))
-                
-        if "work" in source_data:
-            for job in source_data["work"]:
-                self.unified_profile["raw_work_history"].add(self._clean_text(job))
-        
-        if "education" in source_data:
-            for edu in source_data["education"]:
-                self.unified_profile["education_history"].add(self._clean_text(edu))
-
-    def normalize(self, raw_profiles_list: list) -> dict:
-        """
-        iterates through a list of raw scraping results and fuses them 
-        into a single standardized dictionary
-        """
-        for profile in raw_profiles_list:
-            if not profile:
+        for res in raw_results_list:
+            if not res:
                 continue
-                
-            platform = profile.get("platform", "Unknown")
-            self.unified_profile["platforms_analyzed"].append(platform)
             
-            # sets primary name from the first valid source
-            if not self.unified_profile["primary_name"] and profile.get("full_name"):
-                if profile["full_name"].lower() != "not found":
-                    self.unified_profile["primary_name"] = self._clean_text(profile["full_name"])
+            # Record platform
+            platform = res.get("platform")
+            if platform and platform not in self.unified_profile["platforms"]:
+                self.unified_profile["platforms"].append(platform)
 
-            self._merge_text_context(profile)
-            self._extract_lists(profile)
+            # Set name if not set
+            if self.unified_profile["full_name"] == "Unknown" and res.get("full_name") not in ["Not found", "Unknown", None]:
+                self.unified_profile["full_name"] = res.get("full_name")
 
-        # converts sets back to lists for json serialization compatibility
-        self.unified_profile["tech_stack"] = list(self.unified_profile["tech_stack"])
-        self.unified_profile["locations"] = list(self.unified_profile["locations"])
-        self.unified_profile["social_anchors"] = list(self.unified_profile["social_anchors"])
-        self.unified_profile["raw_work_history"] = list(self.unified_profile["raw_work_history"])
-        self.unified_profile["education_history"] = list(self.unified_profile["education_history"])
-        
-        # final cleanup of the unified text
-        self.unified_profile["unified_context"] = self._clean_text(self.unified_profile["unified_context"])
+            # 1. Merge Arrays (with deduplication to prevent noise)
+            array_keys = ["location", "work", "education", "posts", "exposed_family", "contacts", "tech_stack"]
+            for list_key in array_keys:
+                if list_key in res and isinstance(res[list_key], list):
+                    for item in res[list_key]:
+                        if item not in self.unified_profile[list_key]:
+                            self.unified_profile[list_key].append(item)
 
+            # 2. Merge Integers (take the maximum value)
+            int_keys = ["friends_count", "connections_count", "followers_count", "repo_count", "stars_count", "past_jobs_count"]
+            for int_key in int_keys:
+                if int_key in res and isinstance(res[int_key], int):
+                    if res[int_key] > self.unified_profile[int_key]:
+                        self.unified_profile[int_key] = res[int_key]
+
+            # 3. Merge Booleans (Logical OR - if any platform has it, it's True)
+            if res.get("has_endorsements"):
+                self.unified_profile["has_endorsements"] = True
+
+            # 4. Merge Strings (take if not empty)
+            string_keys = ["nickname", "activity_text", "latest_post_date"]
+            for str_key in string_keys:
+                if str_key in res and res[str_key]:
+                    self.unified_profile[str_key] = res[str_key]
+                    
         return self.unified_profile
