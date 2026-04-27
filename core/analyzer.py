@@ -151,7 +151,7 @@ class VulnerabilityAnalyzer:
 
     def analyze(self, profile):
         """Executes the risk evaluation pipeline."""
-        # Рахуємо бали
+        # calc score
         m1 = self._calc_m1(profile)
         m2 = self._calc_m2(profile)
         m3 = self._calc_m3(profile)
@@ -160,13 +160,13 @@ class VulnerabilityAnalyzer:
         total_score = m1 + m2 + m3 + m4
         severity = self._determine_severity(total_score)
         
-        # Вивід у термінал
+        # Output to the terminal
         print(f"      [~] M1 (Professional): {m1}/25")
         print(f"      [~] M2 (Psycho-Social): {m2}/25")
         print(f"      [~] M3 (Technical): {m3}/25")
         print(f"      [~] M4 (Social Graph): {m4}/25")
 
-        # Формуємо знахідки
+        # form findings
         findings = []
         if profile.get("work"):
             findings.append(f"career exposure (potential bec vector): {profile['work'][0][:80]}...")
@@ -177,8 +177,7 @@ class VulnerabilityAnalyzer:
         if profile.get("exposed_family"):
             findings.append(f"trust anchors exposed: {profile['exposed_family'][0]}")
 
-        # ПОВЕРТАЄМО ВСІ МОЖЛИВІ КЛЮЧІ, щоб main.py і reporter.py точно їх знайшли
-        # Платформи передаємо ТІЛЬКИ як список (list), щоб уникнути багу F,a,c,e...
+        #return all keys
         return {
             "target_name": profile.get("full_name", "Unknown"),
             "platforms": profile.get("platforms", []), 
