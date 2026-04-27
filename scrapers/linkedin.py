@@ -5,84 +5,140 @@ from playwright.async_api import async_playwright
 
 class LinkedinScraper:
     """
-    enhanced linkedin scraper with dynamic auditing and improved public profile resilience.
+    Class for extracting OSINT data from LinkedIn profiles.
+    Updated to support the quantitative M1-M4 vulnerability assessment model.
     """
 
     def __init__(self, target_url):
         self.url = target_url
         self.results = {
             "platform": "LinkedIn",
-            "full_name": "not found",
+            "full_name": "Not found",
             "about": "",
             "location": [],
-            "work": [],
-            "education": [] # Додано для синхронізації з Facebook
+            "work": [],            # Current & past detailed jobs
+            "past_jobs_count": 0,  # Factor 4.2
+            "education": [],       # Factor 4.2
+            "contacts": [],        # Factor 1.3
+            "connections_count": 0,# Factor 4.1
+            "has_endorsements": False, # Factor 4.3
+            "skills": []           # Factor 3.1
         }
 
-    async def _scroll_page(self, page, scrolls=3):
-        for _ in range(scrolls):
+    async def _scroll_page(self, page):
+        """Scrolls down slowly to trigger lazy loading of Experience and Skills sections."""
+        for _ in range(5):
             await page.mouse.wheel(0, 800)
             await asyncio.sleep(1.5)
 
-    def _parse_header(self, soup):
-        # Намагаємося знайти ім'я в різних тегах (h1 або специфічні класи)
-        name_tag = soup.find('h1') or soup.find('title')
+    def _clean_number(self, text_val):
+        """Extracts integers from strings like '500+ connections'."""
+        match = re.search(r'([\d,]+)', text_val)
+        if match:
+            clean_str = match.group(1).replace(',', '')
+            return int(clean_str)
+        return 0
+
+    def _parse_profile(self, soup):
+        """Extracts all M1-M4 metrics using DOM-agnostic heuristics with strict noise filtering."""
+        full_text = soup.get_text(separator=" | ")
+
+        # 1. Identity
+        name_tag = soup.find('h1')
+        target_name = ""
         if name_tag:
-            name = name_tag.get_text().split('|')[0].strip()
-            self.results["full_name"] = name
-            print(f"    [+] professional identity: {self.results['full_name']}")
+            target_name = name_tag.get_text().strip()
+            self.results["full_name"] = target_name
+            print(f"    [+] professional identity: {target_name}")
 
-        # Пошук поточної посади
-        headline = soup.find('div', class_=re.compile(r'text-body-medium|top-card-layout__headline', re.I))
-        if headline:
-            work_info = headline.get_text().strip()
-            self.results["work"].append(work_info)
-            print(f"    [+] career headline extracted: {work_info}")
-
-    def _parse_sections(self, soup):
-        text = soup.get_text(separator=' | ')
-        target_name = self.results.get("full_name", "").lower()
-        
-        # Витягуємо локацію (з урахуванням коми для більшої точності)
-        loc_match = re.search(r'([A-Z][a-z]+,?\s[A-Z][a-z]+(?:\s[A-Z][a-z]+)?)', text)
+        # 2. Location extraction (Strict filtering)
+        loc_match = re.search(r'([A-Z][a-z]+,?\s[A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s*\|', full_text)
         if loc_match:
             loc = loc_match.group(1).strip()
-            # Перевіряємо: довжина > 3, це не слово LinkedIn, і це НЕ ім'я нашої цілі
-            if len(loc) > 3 and "LinkedIn" not in loc and loc.lower() not in target_name:
-                self.results["location"].append(loc)
-                print(f"    [+] location data extracted: {loc}")
+            # Усі слова в нижньому регістрі для надійної фільтрації
+            bad_words = ["linkedin", "top content", "profile", "activity", "search", "show all", "experience", "education"]
+            if len(loc) > 3 and loc.lower() not in target_name.lower():
+                if not any(bad in loc.lower() for bad in bad_words):
+                    self.results["location"].append(loc)
+                    print(f"    [+] location data extracted: {loc}")
 
-        # Пошук досвіду
-        if "Experience" in text:
+        # 3. Network Size (Factor 4.1)
+        conn_match = re.search(r'([\d,\+]+)\s*(?:connections|followers)', full_text, re.IGNORECASE)
+        if conn_match:
+            raw_conn = conn_match.group(1)
+            self.results["connections_count"] = self._clean_number(raw_conn)
+            print(f"    [+] social graph metrics: ~{self.results['connections_count']} connections")
+
+        # 4. Contacts (Factor 1.3)
+        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', full_text)
+        if emails:
+            self.results["contacts"].extend(list(set(emails)))
+            print(f"    [+] contact vector (e-mail) exposed: {emails[0]}")
+
+        messengers = re.findall(r'(?:t\.me\/|@)[A-Za-z0-9_]{5,32}', full_text, re.IGNORECASE)
+        if messengers:
+            valid_msgs = [m for m in messengers if "linkedin" not in m.lower()]
+            if valid_msgs:
+                self.results["contacts"].extend(list(set(valid_msgs)))
+
+        # 5. Work History & Descriptions (Factor 1.1 & 4.2)
+        if "Experience" in full_text:
             print("    [+] experience section detected")
+            job_dates = re.findall(r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)?\s*\d{4}\s*[-–]\s*(?:Present|\d{4})', full_text, re.IGNORECASE)
             
-        # Пошук освіти
-        if "Education" in text:
-            edu_match = re.search(r'Education\s*\|\s*(.*?)\|', text, re.I)
+            unique_jobs = list(set(job_dates))
+            self.results["past_jobs_count"] = len(unique_jobs)
+            if self.results["past_jobs_count"] > 0:
+                print(f"    [+] career history: {self.results['past_jobs_count']} roles identified")
+
+            paragraphs = soup.find_all(['span', 'p'])
+            for p in paragraphs:
+                p_text = p.get_text().strip()
+                # Звузили діапазон та додали жорстку фільтрацію
+                if 40 < len(p_text) < 400:
+                    lower_text = p_text.lower()
+                    # Відсікаємо UI елементи
+                    ui_spam = ['cookie', 'agree to', 'join now', 'sign in', 'learn more', 'see more', 'reply', 'like', 'comment', 'repost', 'followers']
+                    # Відсікаємо ознаки постів та відгуків (включаючи різні типи лапок та посилання)
+                    is_post = any(char in p_text for char in ['#', 'http', 'www', '“', '”', '"', '✍️', '🚀', '👇'])
+                    # Відсікаємо специфічні фрази з новинної стрічки
+                    is_feed_chatter = any(word in lower_text for word in ['last week', 'yesterday', 'worked with', 'pleasure', 'thoughts?', 'i placed', 'we’re unlocking'])
+                    
+                    if not any(x in lower_text for x in ui_spam) and not is_post and not is_feed_chatter:
+                        self.results["work"].append(p_text)
+
+        # 6. Education (Factor 4.2)
+        if "Education" in full_text:
+            edu_match = re.search(r'Education\s*\|\s*(.*?)\|', full_text, re.I)
             if edu_match:
                 edu_info = edu_match.group(1).strip()
-                # Додаємо перевірку, щоб не виводити порожні рядки
                 if len(edu_info) > 4:
                     self.results["education"].append(edu_info)
                     print(f"    [+] academic data extracted: {edu_info}")
 
+        # 7. Skills & Endorsements (Factor 3.1 & 4.3)
+        if re.search(r'(Skills|Endorsements|Recommendations)', full_text, re.IGNORECASE):
+            self.results["has_endorsements"] = True
+            print("    [+] public endorsements/skills section detected")
+
     async def run(self):
+        """Orchestrates the scraping process."""
         async with async_playwright() as p:
-            # Використовуємо headless=False для LinkedIn, щоб бачити, чи не вискочив логін-волл
             browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
             context = await browser.new_context()
             page = await context.new_page()
             
+            # Note: LinkedIn restricts unauthenticated views. We rely on what's visible publically.
             await page.goto(self.url)
-            await page.wait_for_timeout(6000) # Даємо час на рендеринг
+            await page.wait_for_timeout(3000)
             
+            # Scroll to load dynamic sections
             await self._scroll_page(page)
             
             html_content = await page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            self._parse_header(soup)
-            self._parse_sections(soup)
+            self._parse_profile(soup)
             
             await browser.close()
             return self.results
