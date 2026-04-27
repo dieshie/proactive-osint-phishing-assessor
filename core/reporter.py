@@ -9,7 +9,7 @@ class VulnerabilityReporter:
     Generates terminal UI using 'rich' and JSON reports for SIEM integration.
     """
     def __init__(self):
-        # Ініціалізуємо консоль rich для красивого виводу (як того очікує main.py)
+        # init console
         self.console = Console()
 
     def display_banner(self):
@@ -21,19 +21,19 @@ class VulnerabilityReporter:
     def display_report(self, analysis_result):
         """Prints the assessment table and findings to the terminal."""
         
-        # Надійно витягуємо дані за новими ключами з analyzer.py
+        # getting data from analyzer
         score = analysis_result.get("score", 0)
         severity = analysis_result.get("severity", "UNKNOWN")
         target_name = analysis_result.get("target_name", "Unknown")
         
-        # Захист від багу з "F, a, c, e, b, o, o, k"
+        # bugfix
         platforms = analysis_result.get("platforms", [])
         if isinstance(platforms, list):
             platforms_str = ", ".join(platforms)
         else:
             platforms_str = str(platforms)
 
-        # Малюємо твою фірмову таблицю
+        # drawing a table
         self.console.print("      [bold]TARGET VULNERABILITY PROFILE[/bold]        ")
         self.console.print("                      ╷                   ")
         self.console.print("  Metric              │ Value             ")
@@ -42,17 +42,17 @@ class VulnerabilityReporter:
         self.console.print(f"  Platforms Analyzed  │ {platforms_str}")
         self.console.print(f"  Vulnerability Index │ [bold white]{score} / 100[/bold white]")
         
-        # Динамічний колір залежно від рівня загрози
+        # dynamic color depend on severity
         sev_color = "red" if severity in ["CRITICAL", "HIGH"] else "yellow" if severity == "MEDIUM" else "green"
         self.console.print(f"  Severity Level      │ [[bold {sev_color}]{severity}[/bold {sev_color}]]")
         self.console.print("                      ╵                   \n")
 
-        # Вивід знайдених векторів атак
+        # output for attack vectors
         self.console.print(" [bold]Identified Attack Vectors & Findings:[/bold]")
         findings = analysis_result.get("findings", [])
         if findings:
             for f in findings:
-                # Обрізаємо занадто довгі тексти, щоб термінал не "ламався"
+                # cut off where text is too long
                 safe_text = str(f).replace("\n", " ")[:150]
                 if len(str(f)) > 150: safe_text += "..."
                 self.console.print(f"  [bold red][!][/bold red] {safe_text}")
@@ -67,7 +67,7 @@ class VulnerabilityReporter:
         safe_name = target_name.lower().replace(" ", "_")
         filepath = os.path.join(output_dir, f"{safe_name}_report_{timestamp}.json")
         
-        # Пакуємо і бали, і всі сирі дані в один файл для диплома
+        # compiling grades and raw data
         export_data = {
             "assessment": analysis_result,
             "raw_dataset": unified_profile
