@@ -124,16 +124,16 @@ class GithubScraper:
         """
         full_text = soup.get_text(separator=" ")
         
-        # Regex шукає патерн типу "6,123 contributions in the last year"
+        # search for pattern: "6,123 contributions in the last year"
         contrib_match = re.search(r'([\d,]+)\s+contributions\s+in\s+the\s+last\s+year', full_text, re.IGNORECASE)
         
         if contrib_match:
-            # Очищаємо від зайвих перенесень рядків та табуляцій
+            # cleaning
             activity_text = re.sub(r'\s+', ' ', contrib_match.group(0)).strip()
             self.results["activity_text"] = activity_text
             print(f"    [+] public activity detected: {activity_text}")
         else:
-            # Альтернативний патерн
+            #alternative pattern
             alt_match = re.search(r'([\d,]+)\s+contributions', full_text, re.IGNORECASE)
             if alt_match:
                 activity_text = re.sub(r'\s+', ' ', alt_match.group(0)).strip()
@@ -149,9 +149,9 @@ class GithubScraper:
             
             await page.goto(self.url)
             
-            # НОВЕ: Робимо невеликий скрол, щоб тригернути завантаження графіка активності
+            # scroll for activity graph
             await page.mouse.wheel(0, 800)
-            await page.wait_for_timeout(2000) # Даємо 2 секунди на рендеринг SVG-графіка
+            await page.wait_for_timeout(2000) #time for load
             
             try:
                 await page.wait_for_selector('.vcard-names', timeout=5000)
