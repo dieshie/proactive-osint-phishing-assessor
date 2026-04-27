@@ -5,8 +5,8 @@ from playwright.async_api import async_playwright
 
 class FacebookScraper:
     """
-    class for extracting osint data from facebook public profiles
-    with execution auditing.
+    Class for extracting OSINT data from Facebook public profiles.
+    Updated to support the M1-M4 quantitative vulnerability assessment model.
     """
 
     def __init__(self, target_url, last_name):
@@ -20,30 +20,73 @@ class FacebookScraper:
             "work": [],
             "posts": [],
             "exposed_family": [],
-            "education": []
+            "education": [],
+            "contacts": [],        # New: For Factor 1.3 (e-mails, messengers)
+            "friends_count": 0     # New: For Factor 4.1 (network size)
         }
 
     async def _scroll_page(self, page, scrolls=3):
+        """Emulates mouse wheel scrolling to trigger lazy loading."""
         for _ in range(scrolls):
             await page.mouse.wheel(0, 1000)
             await asyncio.sleep(2)
 
     def _parse_followers(self, soup, full_name):
+        """Identifies potential relatives by surname matching in followers list."""
         relatives = []
         nodes = soup.find_all(['span', 'a'])
+        
         for node in nodes:
             name = node.get_text(separator=" ").strip()
             if self.last_name.lower() in name.lower():
                 if len(name.split()) >= 2 and full_name.lower() not in name.lower():
                     if not any(x in name.lower() for x in ["facebook", "friends"]):
-                        relatives.append(name)
+                        # Factor 2.1: Extracting href links for relatives if available
+                        link = ""
+                        if node.name == 'a' and node.has_attr('href'):
+                            link = f" [URL: {node['href'].split('?')[0]}]"
+                        elif node.parent.name == 'a' and node.parent.has_attr('href'):
+                            link = f" [URL: {node.parent['href'].split('?')[0]}]"
+                            
+                        relatives.append(name + link)
         return list(set(relatives))
 
     def _parse_main_content(self, soup):
         """
-        extracts relationship status, career info, locations, and education
-        with dynamic console tracing.
+        Extracts relationship status, career info, locations, and education.
+        Implements heuristics for Factors 1.1, 1.3, 2.1, 2.2, 4.1.
         """
+        # Factor 1.3 & 4.1: Extracting Global Artifacts (Emails, Messengers, Friends Count)
+        full_page_text = soup.get_text(separator=" ")
+        
+        # Regex for emails
+        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', full_page_text)
+        if emails:
+            self.results["contacts"].extend(list(set(emails)))
+            print(f"    [+] contact vector (e-mail) exposed: {emails[0]}")
+
+        # Regex for telegram/skype (basic heuristic)
+        messengers = re.findall(r'(?:t\.me\/|skype:)[A-Za-z0-9_]{5,32}', full_page_text, re.IGNORECASE)
+        if messengers:
+            self.results["contacts"].extend(list(set(messengers)))
+            print(f"    [+] contact vector (messenger) exposed: {messengers[0]}")
+
+        # Regex for friends/followers count (Factor 4.1)
+        friends_match = re.search(r'([\d,\.]+)[KkMm]?\s*(?:friends|followers|connections)', full_page_text, re.IGNORECASE)
+        if friends_match:
+            try:
+                # Cleaning string like "1,200" or "1.5K" to integer
+                raw_num = friends_match.group(1).replace(',', '')
+                multiplier = 1
+                if 'k' in friends_match.group(0).lower(): multiplier = 1000
+                if 'm' in friends_match.group(0).lower(): multiplier = 1000000
+                
+                self.results["friends_count"] = int(float(raw_num) * multiplier)
+                print(f"    [+] social graph metrics detected: ~{self.results['friends_count']} connections")
+            except ValueError:
+                pass
+
+        # Contextual Extraction (Work, Location, Status)
         keywords = [
             "married to", "у шлюбі", "relationship", "відносини", 
             "works at", "працює в", "founder", "owner", 
@@ -63,26 +106,33 @@ class FacebookScraper:
                         curr = curr.parent
                         text = re.sub(r'\s+', ' ', curr.get_text(separator=" ").strip())
                         
-                        if len(text) > len(kw) + 3 and len(text) < 150:
-                            # 1. Сімейний статус -> йде у exposed_family
+                        if len(text) > len(kw) + 3 and len(text) < 250: # Increased limit for detailed descriptions
+                            # 1. Social tie (Factor 2.1)
                             if any(x in kw.lower() for x in ["married", "шлюб", "relationship"]):
-                                print(f"    [+] social tie extracted: {text}")
-                                self.results["exposed_family"].append(text)
+                                # Attempt to find partner's profile link
+                                partner_link = ""
+                                link_tag = curr.find('a', href=True)
+                                if link_tag:
+                                    partner_link = f" [URL: {link_tag['href'].split('?')[0]}]"
                                 
-                            # 2. Робота -> йде у work
+                                final_text = text + partner_link
+                                print(f"    [+] social tie extracted: {final_text}")
+                                self.results["exposed_family"].append(final_text)
+                                
+                            # 2. Career (Factor 1.1)
                             elif any(x in kw.lower() for x in ["works", "founder", "owner", "працює"]):
-                                print(f"    [+] career data extracted: {text}")
+                                print(f"    [+] career data extracted: {text[:50]}...")
                                 self.results["work"].append(text)
                                 
-                            # 3. Локація -> йде у location
+                            # 3. Location (Factor 2.2)
                             elif any(x in kw.lower() for x in ["lives", "живе", "from", "родом", "born"]):
                                 print(f"    [+] location data extracted: {text}")
                                 self.results["location"].append(text)
                                 
-                            # 4. Освіта 
+                            # 4. Education (Factor 4.2)
                             elif any(x in kw.lower() for x in ["studied", "university", "went", "college", "навчався"]):
                                 print(f"    [+] academic data extracted: {text}")
-                                self.results["education"].append(text) # ЗМІНЕНО З about
+                                self.results["education"].append(text)
                                 
                             found_full_text = True
                             break
@@ -90,6 +140,25 @@ class FacebookScraper:
                     break
 
     def _parse_posts(self, soup):
+        """
+        Collects recent posts and attempts to identify the date of the latest activity.
+        Used for Factor 4.3 (Public Activity).
+        """
+        # Facebook often uses <span> or <a> for timestamps
+        # We look for common patterns in post headers
+        self.results["latest_post_date"] = None
+        
+        # Heuristic: Find elements that likely contain dates (e.g., "April 8", "12h", "Just now")
+        # In FB, timestamps are often inside <span> tags within the post header
+        potential_dates = soup.find_all(['span', 'a'], string=re.compile(r'(\d+\s*(?:h|m|d|hrs|mins|days)|January|February|March|April|May|June|July|August|September|October|November|December)', re.IGNORECASE))
+        
+        if potential_dates:
+            # We take the first one found, as it's usually the most recent post at the top
+            raw_date = potential_dates[0].get_text().strip()
+            self.results["latest_post_date"] = raw_date
+            print(f"    [+] activity detected: latest post around '{raw_date}'")
+
+        # Original post text extraction logic
         text_blocks = soup.find_all(attrs={"dir": "auto"})
         for block in text_blocks:
             post_text = block.get_text(separator=" ").strip()
@@ -97,9 +166,11 @@ class FacebookScraper:
                 ui_elements = ["Write a comment", "See translation", "Share", "Like", "Comment"]
                 if not any(ui in post_text for ui in ui_elements):
                     self.results["posts"].append(post_text)
+        
         self.results["posts"] = list(set(self.results["posts"]))[:3]
 
     async def run(self):
+        """Orchestrates the scraping process using playwright."""
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
             context = await browser.new_context()
@@ -116,7 +187,6 @@ class FacebookScraper:
             if title:
                 self.results["full_name"] = title.get_text().replace("| Facebook", "").strip()
 
-            # Викликаємо оновлені парсери
             self._parse_main_content(main_soup)
             self._parse_posts(main_soup)
             
@@ -127,7 +197,6 @@ class FacebookScraper:
             followers_html = await page.content()
             followers_soup = BeautifulSoup(followers_html, 'html.parser')
             
-            # Додаємо родичів з фоловерів до загального списку
             followers_relatives = self._parse_followers(followers_soup, self.results["full_name"])
             self.results["exposed_family"].extend(followers_relatives)
             
