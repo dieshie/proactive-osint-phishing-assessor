@@ -1,138 +1,191 @@
-import spacy
+import re
 
 class VulnerabilityAnalyzer:
     """
-    heuristic engine for semantic analysis and cyber risk scoring 
-    based on aggregated osint profiles.
+    Core engine for quantitative vulnerability assessment.
+    Implements the M1-M4 mathematical model described in Section 3.
     """
 
     def __init__(self):
-        try:
-            self.nlp = spacy.load("en_core_web_sm")
-        except OSError:
-            print("[!] error: nlp model not found. run: python -m spacy download en_core_web_sm")
-            self.nlp = None
-
-        self.weights = {
-            "high_value_target": 25, 
-            "tech_exposure": 20,     
-            "social_trust": 20,      
-            "corporate_vectors": 20, 
-            "behavioral_triggers": 15 
+        # Threat severity mapping based on Section 3.4
+        self.severity_scale = {
+            "LOW": (0, 29),
+            "MEDIUM": (30, 59),
+            "HIGH": (60, 100)
         }
 
-    def _evaluate_hvt_status(self, work_history: list) -> dict:
-        """
-        checks for high-value target (hvt) indicators in career history
-        and lists ALL identified career vectors
-        """
-        hvt_keywords = ['ceo', 'founder', 'director', 'admin', 'devops', 'ciso', 'head', 'owner']
-        result = {"score": 0, "findings": []}
+    def _calc_m1(self, profile):
+        """Factor 1: Professional Role & Environment Exposure (Max 25)"""
+        score = 0
+        work_entries = profile.get("work", [])
+        work_text = " ".join(work_entries).lower()
+        contacts = profile.get("contacts", [])
+
+        # 1.1 Job Details (Max 10)
+        if work_entries:
+            score += 3  # Company + general role
+            if re.search(r'developer|engineer|manager|ceo|cto|founder|director|lead|specialist|accountant', work_text):
+                score += 4
+            if any(len(w) > 80 for w in work_entries):
+                score += 3
+
+        # 1.2 Employer Publicity (Max 5)
+        if work_entries:
+            score += 3  # Company clearly stated
+            if re.search(r'startup|enterprise|inc\.|llc|corp|ltd', work_text):
+                score += 2
+
+        # 1.3 Contacts (Max 10)
+        contacts_text = " ".join(contacts).lower()
+        if '@' in contacts_text:
+            score += 6  # Email found
+        if re.search(r't\.me|skype|whatsapp', contacts_text):
+            score += 4  # Messenger found
+
+        return min(25, score)
+
+    def _calc_m2(self, profile):
+        """Factor 2: Socio-Psychological Context (Max 25)"""
+        score = 0
+        family_entries = profile.get("exposed_family", [])
+        locations = profile.get("location", [])
         
-        is_hvt = False
-        all_jobs = []
+        # 2.1 Family (Max 10)
+        if family_entries:
+            score += 3  
+            score += 5  
+            if any("url:" in f.lower() for f in family_entries):
+                score += 2  
 
-        for job in work_history:
-            all_jobs.append(job)
-            if any(keyword in job.lower() for keyword in hvt_keywords):
-                is_hvt = True
+        # 2.2 Geolocation (Max 9)
+        if locations:
+            score += 2  
+            if profile.get("education"):
+                score += 3  
+            loc_text = " ".join(locations).lower()
+            if re.search(r'st\.|street|ave|blvd|apt|вул\.|просп\.', loc_text):
+                score += 4  
 
-        if is_hvt:
-            result["score"] = self.weights["high_value_target"]
-            result["findings"].append(f"high-value target role identified in: {', '.join(all_jobs)}")
-        elif all_jobs:
-            # Якщо не HVT, але є місце роботи, все одно виводимо у звіт (без додаткових 25 балів)
-            result["findings"].append(f"career exposure (potential bec vector): {', '.join(all_jobs)}")
-                
-        return result
+        # 2.3 Profile Openness (Max 6)
+        score += 4 
+        if profile.get("latest_post_date") or len(profile.get("posts", [])) > 0:
+            score += 2  
 
-    def _analyze_nlp_context(self, text: str, education_history: list) -> dict:
-        """
-        performs named entity recognition and integrates isolated academic data
-        """
-        result = {"score": 0, "findings": []}
-        found_orgs = set()
+        return min(25, score)
 
-        # 1. NLP Аналіз лише для пошуку корпорацій у чистому тексті
-        if self.nlp and text:
-            doc = self.nlp(text)
-            for ent in doc.ents:
-                # Беремо лише справжні ORG і фільтруємо сміттєві фрази
-                if ent.label_ == "ORG" and len(ent.text) > 3 and len(ent.text) < 40:
-                    found_orgs.add(ent.text)
+    def _calc_m3(self, profile):
+        """Factor 3: Technical Exposure & Identity (Max 25)"""
+        score = 0
+        tech = profile.get("tech_stack", [])
+        tech_text = " ".join(tech).lower()
+        
+        # 3.1 Tech Stack (Max 10)
+        if tech:
+            score += 2  
+            if re.search(r'react|vue|angular|django|flask|node|sql|mongo|postgres', tech_text):
+                score += 3  
+            if re.search(r'aws|docker|kubernetes|k8s|ci/cd|terraform|shell|linux|azure', tech_text):
+                score += 5  
 
-        # 2. Додаємо чітко ізольовані дані про освіту (без багів злиття)
-        for edu in education_history:
-            found_orgs.add(edu)
+        # 3.2 Public Projects (Max 10)
+        repos = profile.get("repo_count", 0)
+        if repos > 3:
+            score += 4
+        elif repos > 0:
+            score += 2
+            
+        if profile.get("stars_count", 0) > 10:
+            score += 6
 
-        if found_orgs:
-            result["score"] += self.weights["corporate_vectors"]
-            orgs_str = " | ".join(list(found_orgs)[:4]) 
-            result["findings"].append(f"corporate/academic entities exposed: {orgs_str}")
+        # 3.3 Digital Identifiers (Max 5)
+        if profile.get("nickname"):
+            score += 1
+        if len(profile.get("platforms", [])) >= 2:
+            score += 4
 
-        # Пошук маркерів стресу
-        stress_markers = ["urgent", "stress", "tired", "looking for new opportunities", "open to work"]
-        if text and any(marker in text.lower() for marker in stress_markers):
-            result["score"] += self.weights["behavioral_triggers"]
-            result["findings"].append("emotional/behavioral stress markers detected")
+        return min(25, score)
 
-        return result
+    def _calc_m4(self, profile):
+        """Factor 4: Social Graph Depth (Max 25)"""
+        score = 0
+        
+        # 4.1 Network Size (Max 12)
+        friends = max([
+            profile.get("friends_count", 0), 
+            profile.get("connections_count", 0), 
+            profile.get("followers_count", 0)
+        ])
+        if friends > 0:
+            score += 5
+        if friends > 100:
+            score += 3
+        if friends >= 500:
+            score += 4
 
-    def _evaluate_technical_and_social(self, profile: dict) -> dict:
-        """
-        assesses technical exposure, social trust vectors, and ALL locations
-        """
-        result = {"score": 0, "findings": []}
+        # 4.2 Work/Education History (Max 7)
+        if profile.get("past_jobs_count", 0) >= 2 or len(profile.get("work", [])) >= 2:
+            score += 4
+            
+        edu_text = " ".join(profile.get("education", []))
+        if re.search(r'20\d{2}', edu_text):
+            score += 3  
 
+        # 4.3 Activity & Endorsements (Max 6)
+        if profile.get("has_endorsements", False):
+            score += 3
+            
+        activity_text = profile.get("activity_text", "")
+        contrib_match = re.search(r'([\d,]+)', activity_text)
+        if contrib_match:
+            contribs = int(contrib_match.group(1).replace(',', ''))
+            if contribs > 100:
+                score += 3
+
+        return min(25, score)
+
+    def _determine_severity(self, total_score):
+        for severity, (low, high) in self.severity_scale.items():
+            if low <= total_score <= high:
+                return severity
+        return "UNKNOWN"
+
+    def analyze(self, profile):
+        """Executes the risk evaluation pipeline."""
+        # Рахуємо бали
+        m1 = self._calc_m1(profile)
+        m2 = self._calc_m2(profile)
+        m3 = self._calc_m3(profile)
+        m4 = self._calc_m4(profile)
+        
+        total_score = m1 + m2 + m3 + m4
+        severity = self._determine_severity(total_score)
+        
+        # Вивід у термінал
+        print(f"      [~] M1 (Professional): {m1}/25")
+        print(f"      [~] M2 (Psycho-Social): {m2}/25")
+        print(f"      [~] M3 (Technical): {m3}/25")
+        print(f"      [~] M4 (Social Graph): {m4}/25")
+
+        # Формуємо знахідки
+        findings = []
+        if profile.get("work"):
+            findings.append(f"career exposure (potential bec vector): {profile['work'][0][:80]}...")
         if profile.get("tech_stack"):
-            result["score"] += self.weights["tech_exposure"]
-            tech_str = ", ".join(profile["tech_stack"][:5])
-            result["findings"].append(f"technology stack exposed: {tech_str}")
+            findings.append(f"technology stack exposed: {', '.join(profile['tech_stack'])}")
+        if profile.get("location"):
+            findings.append(f"geolocation/origin data exposed: {' | '.join(profile['location'])}")
+        if profile.get("exposed_family"):
+            findings.append(f"trust anchors exposed: {profile['exposed_family'][0]}")
 
-        if profile.get("social_anchors"):
-            result["score"] += self.weights["social_trust"]
-            anchors = ", ".join(profile["social_anchors"])
-            result["findings"].append(f"trust anchors exposed: {anchors}")
-
-        if profile.get("locations"):
-            result["score"] += self.weights["behavioral_triggers"]
-            locs = " | ".join(profile["locations"])
-            result["findings"].append(f"geolocation/origin data exposed: {locs}")
-
-        return result
-
-    def _determine_severity(self, score: int) -> str:
-        if score <= 25: return "LOW"
-        if score <= 50: return "MEDIUM"
-        if score <= 75: return "HIGH"
-        return "CRITICAL"
-
-    def analyze(self, unified_profile: dict) -> dict:
-        final_score = 0
-        all_findings = []
-
-        hvt_eval = self._evaluate_hvt_status(unified_profile.get("raw_work_history", []))
-        final_score += hvt_eval["score"]
-        all_findings.extend(hvt_eval["findings"])
-
-        # ПЕРЕДАЄМО ОСВІТУ В NLP-АНАЛІЗАТОР
-        nlp_eval = self._analyze_nlp_context(
-            unified_profile.get("unified_context", ""),
-            unified_profile.get("education_history", [])
-        )
-        final_score += nlp_eval["score"]
-        all_findings.extend(nlp_eval["findings"])
-
-        tech_soc_eval = self._evaluate_technical_and_social(unified_profile)
-        final_score += tech_soc_eval["score"]
-        all_findings.extend(tech_soc_eval["findings"])
-
-        bounded_score = min(100, final_score)
-
+        # ПОВЕРТАЄМО ВСІ МОЖЛИВІ КЛЮЧІ, щоб main.py і reporter.py точно їх знайшли
+        # Платформи передаємо ТІЛЬКИ як список (list), щоб уникнути багу F,a,c,e...
         return {
-            "target_name": unified_profile.get("primary_name", "Unknown"),
-            "platforms": unified_profile.get("platforms_analyzed", []),
-            "vulnerability_score": bounded_score,
-            "severity_level": self._determine_severity(bounded_score),
-            "identified_vectors": all_findings
+            "target_name": profile.get("full_name", "Unknown"),
+            "platforms": profile.get("platforms", []), 
+            "score": total_score,
+            "vulnerability_index": total_score, 
+            "severity": severity,
+            "severity_level": severity,
+            "findings": findings,
+            "attack_vectors": findings
         }
