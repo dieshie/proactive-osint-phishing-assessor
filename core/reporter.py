@@ -1,107 +1,79 @@
 import json
+import os
 from datetime import datetime
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich import box
 
 class VulnerabilityReporter:
     """
-    class for generating structured console interfaces and exporting 
-    analysis results into standardized json formats.
+    Handles the formatting and exporting of the final quantitative vulnerability assessment.
+    Generates terminal UI using 'rich' and JSON reports for SIEM integration.
     """
-
     def __init__(self):
+        # Ініціалізуємо консоль rich для красивого виводу (як того очікує main.py)
         self.console = Console()
 
     def display_banner(self):
-        """
-        renders the ascii art banner with a magnifying glass motif
-        """
-        magnifying_glass = """
-[bold cyan]
-      .--------.
-    /          \\
-   |   [white]OSINT[/white]    |
-   |   [white]SCAN[/white]     |
-    \\          /
-      '--------'
-           \\  \\
-            \\  \\
-             \\  \\
-              \\__\\  [bold white]PROACTIVE CYBER THREAT DETECTION[/bold white]
-                      [dim]automated vulnerability profiling engine[/dim]
-        """
-        self.console.print(Panel(magnifying_glass, border_style="blue", box=box.ROUNDED))
+        """Displays the application startup banner."""
+        self.console.print("\n[bold cyan]==========================================[/bold cyan]")
+        self.console.print("[bold cyan]   PROACTIVE OSINT PHISHING ASSESSOR      [/bold cyan]")
+        self.console.print("[bold cyan]==========================================[/bold cyan]\n")
 
-    def _get_severity_color(self, severity: str) -> str:
-        """
-        maps risk severity levels to console display colors
-        """
-        colors = {
-            "LOW": "green",
-            "MEDIUM": "yellow",
-            "HIGH": "orange3",
-            "CRITICAL": "bold red"
-        }
-        return colors.get(severity.upper(), "white")
-
-    def display_report(self, analysis_result: dict):
-        """
-        builds and prints a formatted terminal table containing the analysis results
-        """
-        severity = analysis_result.get("severity_level", "UNKNOWN")
-        score = analysis_result.get("vulnerability_score", 0)
-        color = self._get_severity_color(severity)
-
-        # creating the main summary table
-        table = Table(title="[bold]TARGET VULNERABILITY PROFILE[/bold]", box=box.MINIMAL_DOUBLE_HEAD)
+    def display_report(self, analysis_result):
+        """Prints the assessment table and findings to the terminal."""
         
-        table.add_column("Metric", style="cyan", no_wrap=True)
-        table.add_column("Value", style="white")
-
-        platforms_str = ", ".join(analysis_result.get("platforms", []))
+        # Надійно витягуємо дані за новими ключами з analyzer.py
+        score = analysis_result.get("score", 0)
+        severity = analysis_result.get("severity", "UNKNOWN")
+        target_name = analysis_result.get("target_name", "Unknown")
         
-        table.add_row("Target Name", f"[bold]{analysis_result.get('target_name', 'Unknown')}[/bold]")
-        table.add_row("Platforms Analyzed", platforms_str)
-        table.add_row("Vulnerability Index", f"[{color}]{score} / 100[/{color}]")
-        table.add_row("Severity Level", f"[{color}][{severity}][/{color}]")
-        
-        self.console.print(table)
-        self.console.print("\n[bold cyan]Identified Attack Vectors & Findings:[/bold cyan]")
-        
-        # printing specific findings
-        findings = analysis_result.get("identified_vectors", [])
-        if not findings:
-            self.console.print("[green]  [+] no critical vulnerabilities identified.[/green]")
+        # Захист від багу з "F, a, c, e, b, o, o, k"
+        platforms = analysis_result.get("platforms", [])
+        if isinstance(platforms, list):
+            platforms_str = ", ".join(platforms)
         else:
-            for finding in findings:
-                self.console.print(f"  [red][!][/red] {finding}")
+            platforms_str = str(platforms)
+
+        # Малюємо твою фірмову таблицю
+        self.console.print("      [bold]TARGET VULNERABILITY PROFILE[/bold]        ")
+        self.console.print("                      ╷                   ")
+        self.console.print("  Metric              │ Value             ")
+        self.console.print(" ═════════════════════╪══════════════════ ")
+        self.console.print(f"  Target Name         │ [bold]{target_name}[/bold]")
+        self.console.print(f"  Platforms Analyzed  │ {platforms_str}")
+        self.console.print(f"  Vulnerability Index │ [bold white]{score} / 100[/bold white]")
         
+        # Динамічний колір залежно від рівня загрози
+        sev_color = "red" if severity in ["CRITICAL", "HIGH"] else "yellow" if severity == "MEDIUM" else "green"
+        self.console.print(f"  Severity Level      │ [[bold {sev_color}]{severity}[/bold {sev_color}]]")
+        self.console.print("                      ╵                   \n")
+
+        # Вивід знайдених векторів атак
+        self.console.print(" [bold]Identified Attack Vectors & Findings:[/bold]")
+        findings = analysis_result.get("findings", [])
+        if findings:
+            for f in findings:
+                # Обрізаємо занадто довгі тексти, щоб термінал не "ламався"
+                safe_text = str(f).replace("\n", " ")[:150]
+                if len(str(f)) > 150: safe_text += "..."
+                self.console.print(f"  [bold red][!][/bold red] {safe_text}")
+        else:
+            self.console.print("  [bold green][+][/bold green] no critical vulnerabilities identified.")
         self.console.print("\n")
 
-    def export_to_json(self, analysis_result: dict, unified_profile: dict, output_dir: str = "."):
-        """
-        saves the final unified report and normalized dataset to the filesystem 
-        for record keeping and third-party siem integration.
-        """
-        target_name = analysis_result.get("target_name", "unknown_target").replace(" ", "_").lower()
+    def export_to_json(self, analysis_result, unified_profile, output_dir):
+        """Saves the complete report and raw data to a JSON file."""
+        target_name = analysis_result.get("target_name", "Unknown")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_dir}/{target_name}_report_{timestamp}.json"
-
-        # preparing metadata and rich data wrapper
+        safe_name = target_name.lower().replace(" ", "_")
+        filepath = os.path.join(output_dir, f"{safe_name}_report_{timestamp}.json")
+        
+        # Пакуємо і бали, і всі сирі дані в один файл для диплома
         export_data = {
-            "metadata": {
-                "scan_time": datetime.now().isoformat(),
-                "engine_version": "1.1" # Підняли версію через новий функціонал
-            },
-            "profile_analysis": analysis_result,
-            "normalized_dataset": unified_profile # ДОДАНО: Повний набір очищених даних
+            "assessment": analysis_result,
+            "raw_dataset": unified_profile
         }
 
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=4, ensure_ascii=False)
-            self.console.print(f"[dim]report successfully saved to {filename}[/dim]")
-        except Exception as e:
-            self.console.print(f"[bold red]error saving json report: {e}[/bold red]")
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, indent=4, ensure_ascii=False)
+            
+        self.console.print(f"[dim]report successfully saved to {filepath}[/dim]\n")
