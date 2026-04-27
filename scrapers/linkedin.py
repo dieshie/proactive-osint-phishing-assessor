@@ -94,14 +94,14 @@ class LinkedinScraper:
             paragraphs = soup.find_all(['span', 'p'])
             for p in paragraphs:
                 p_text = p.get_text().strip()
-                # Звузили діапазон та додали жорстку фільтрацію
+                #hard filtration
                 if 40 < len(p_text) < 400:
                     lower_text = p_text.lower()
-                    # Відсікаємо UI елементи
+                    # cut off ui
                     ui_spam = ['cookie', 'agree to', 'join now', 'sign in', 'learn more', 'see more', 'reply', 'like', 'comment', 'repost', 'followers']
-                    # Відсікаємо ознаки постів та відгуків (включаючи різні типи лапок та посилання)
+                    #cut off post
                     is_post = any(char in p_text for char in ['#', 'http', 'www', '“', '”', '"', '✍️', '🚀', '👇'])
-                    # Відсікаємо специфічні фрази з новинної стрічки
+                    #cut off phrases
                     is_feed_chatter = any(word in lower_text for word in ['last week', 'yesterday', 'worked with', 'pleasure', 'thoughts?', 'i placed', 'we’re unlocking'])
                     
                     if not any(x in lower_text for x in ui_spam) and not is_post and not is_feed_chatter:
