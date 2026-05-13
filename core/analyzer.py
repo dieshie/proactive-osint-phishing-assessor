@@ -41,6 +41,12 @@ class VulnerabilityAnalyzer:
             score += 6  # Email found
         if re.search(r't\.me|skype|whatsapp', contacts_text):
             score += 4  # Messenger found
+        
+        # factor in nlp-extracted hidden organizations
+        nlp_orgs = profile.get("nlp_orgs", [])
+        if nlp_orgs:
+            # add up to 3 points for hidden orgs found in text context
+            score += min(3, len(nlp_orgs))
 
         return min(25, score)
 
@@ -69,9 +75,16 @@ class VulnerabilityAnalyzer:
         # 2.3 Profile Openness (Max 6)
         score += 4 
         if profile.get("latest_post_date") or len(profile.get("posts", [])) > 0:
-            score += 2  
+            score += 2 
+
+        # factor in nlp-extracted hidden geolocations
+        nlp_locs = profile.get("nlp_locations", [])
+        if nlp_locs:
+            # add up to 3 points for hidden locations found in text context
+            score += min(3, len(nlp_locs))
 
         return min(25, score)
+
 
     def _calc_m3(self, profile):
         """Factor 3: Technical Exposure & Identity (Max 25)"""
@@ -170,6 +183,10 @@ class VulnerabilityAnalyzer:
         findings = []
         if profile.get("work"):
             findings.append(f"career exposure (potential bec vector): {profile['work'][0][:80]}...")
+        if profile.get("nlp_orgs"):
+            findings.append(f"nlp extracted hidden organizations: {', '.join(profile['nlp_orgs'])}")
+        if profile.get("nlp_locations"):
+            findings.append(f"nlp extracted hidden locations: {', '.join(profile['nlp_locations'])}")
         if profile.get("tech_stack"):
             findings.append(f"technology stack exposed: {', '.join(profile['tech_stack'])}")
         if profile.get("location"):

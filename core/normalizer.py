@@ -1,3 +1,5 @@
+from core.nlp_engine import NlpEngine
+
 class DataNormalizer:
     """
     Fuses data from multiple OSINT modules into a single Unified Profile.
@@ -5,6 +7,7 @@ class DataNormalizer:
     quantitative vulnerability assessment.
     """
     def __init__(self):
+        self.nlp = NlpEngine()
         self.unified_profile = {
             "full_name": "Unknown",
             "platforms": [],          # Tracks which scrapers succeeded (Factor 3.3)
@@ -77,5 +80,8 @@ class DataNormalizer:
             for str_key in string_keys:
                 if str_key in res and res[str_key]:
                     self.unified_profile[str_key] = res[str_key]
+            
+        # enrich the unified profile with nlp entities before returning
+        self.unified_profile = self.nlp.enrich(self.unified_profile)
                     
         return self.unified_profile

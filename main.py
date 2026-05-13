@@ -91,8 +91,9 @@ class OSINTCoordinator:
                 normalizer = DataNormalizer() # initialized per target to prevent data leakage
                 unified_profile = normalizer.normalize(raw_profiles)
 
-                # 3. semantic nlp analysis and heuristic scoring
+                # 3. regex & nlp analysis and heuristic scoring
                 self.reporter.console.print("[dim] -> executing nlp and heuristic risk evaluation...[/dim]")
+
                 analysis_result = self.analyzer.analyze(unified_profile)
 
                 # 4. reporting phase
